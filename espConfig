@@ -1,0 +1,40 @@
+#config data for esp sensors
+#Each sensor starts with its Mac address then lines with
+#hostname,serverMode,EIOT name,MQTTTOpic,checkInterval,forceUpdateInterval,boilerInterval,boilerNode,bellNode,bellNotify,bellEvent,bellActionURL
+#unused paraeters are set to -1
+#SECURITYSENSOR01
+AAAAAABBBBBB
+esp8266-secsensor01
+128
+N17S0
+security-Sensor
+securityNotify
+500
+1
+#http://192.168.0.9:8080/request
+-1
+0.976
+-1
+-1
+-1
+-1
+-1
+-1
+#SECURITYSENSOR02
+DDDDDDEEEEEE
+esp8266-secsensor02
+128
+N20S0
+security-Sensor
+securityNotify
+500
+2
+#http://192.168.0.9:8080/request
+-1
+0.976
+-1
+-1
+-1
+-1
+-1
+-1

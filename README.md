@@ -25,6 +25,7 @@ See schematics for hook up.
 
 ### Install procedure
 - Change passwords and notification keys in ino to suit
+    - WifiManager,OTA, config server
 - Normal arduino esp8266 compile and upload
 - Use WifiManager to config local wifi
 - Edit espConfig to suit and put on central server
