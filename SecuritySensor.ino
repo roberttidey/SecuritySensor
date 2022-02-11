@@ -6,59 +6,22 @@
  WifiManager can be used to config wifi network
  
  */
-//Uncomment to use IFTTT instead of pushover
-//#define USE_IFTTT
 #define ESP8266
+#include "BaseConfig.h"
 
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h>
-#include <ESP8266HTTPUpdateServer.h>
-#ifdef USE_IFTTT
-	#include <IFTTTMaker.h>
-#endif
 #include <WiFiClientSecure.h>
-#include <ArduinoJson.h>
-#include <DNSServer.h>
-#include <WiFiManager.h>
-
-//put -1 s at end
-int unusedPins[11] = {0,2,4,5,12,14,16,-1,-1,-1,-1};
-
-/*
-Wifi Manager Web set up
-If WM_NAME defined then use WebManager
-*/
-#define WM_NAME "SecuritySensorSetup"
-#define WM_PASSWORD "password"
-#ifdef WM_NAME
-	WiFiManager wifiManager;
-#endif
-//uncomment to use a static IP
-//#define WM_STATIC_IP 192,168,0,100
-//#define WM_STATIC_GATEWAY 192,168,0,1
 
 int timeInterval = 100;
-#define WIFI_CHECK_TIMEOUT 30000
 #define REPORT_TIMEOUT 15000
 unsigned long elapsedTime;
-unsigned long wifiCheckTime;
 #define REPORT_STATE_IDLE 0
 #define REPORT_STATE_PENDING 1
 #define REPORT_STATE_COMPLETE 2
 int reportState = REPORT_STATE_IDLE;
 
 #define POWER_HOLD_PIN 13
-
-#define AP_AUTHID "123456"
-#define AP_SECURITY "?event=zoneSet&auth=123456"
-
-//For update service
-String host = "esp8266-hall";
-const char* update_path = "/firmware";
-const char* update_username = "admin";
-const char* update_password = "password";
 
 //bit mask for server support
 #define EASY_IOT_MASK 1
@@ -70,10 +33,6 @@ const char* update_password = "password";
 #define SECURITYSENSOR_MASK 128
 int serverMode = 1;
 
-// Push notifications
-const String NOTIFICATION_APP =  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const String NOTIFICATION_USER = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";  // This can be a group or user
-
 bool isSendPush = false;
 String pushParameters;
 
@@ -84,81 +43,29 @@ float battery_volts;
 
 #define SLEEP_MASK 5
 
-//AP definitions
-#define AP_SSID "ssid"
-#define AP_PASSWORD "password"
-#define AP_MAX_WAIT 10
-String macAddr;
-
-#define AP_PORT 80
-
-ESP8266WebServer server(AP_PORT);
-ESP8266HTTPUpdateServer httpUpdater;
+WiFiClient client;
 HTTPClient cClient;
 WiFiClientSecure https;
 
-#ifdef USE_IFTTT
-	//IFTT and request key words
-	#define MAKER_KEY "bbbbbbbbbbbbbbbbbb"
-	IFTTTMaker ifttt(MAKER_KEY, https);
-#endif
 //Config remote fetch from web page (include port in url if not 80)
 #define CONFIG_IP_ADDRESS  "http://192.168.0.7/espConfig"
 //Comment out for no authorisation else uses same authorisation as EIOT server
 #define CONFIG_AUTH 1
 #define CONFIG_PAGE "espConfig"
-#define CONFIG_RETRIES 10
+#define CONFIG_RETRIES 2
 
 // EasyIoT server definitions
 #define EIOT_USERNAME    "admin"
-#define EIOT_PASSWORD    "password"
 //EIOT report URL (include port in url if not 80)
 #define EIOT_IP_ADDRESS  "http://192.168.0.7/Api/EasyIoT/Control/Module/Virtual/"
 String eiotNode = "-1";
 String pirEvent = "-1";
 String pirNotify = "-1";
 String securityURL = "-1";
+String securitySound = "siren";
 int gapDelay = 1000;
 int securityDevice = 0;
 int sleepMask = 0;
-
-void ICACHE_RAM_ATTR  delaymSec(unsigned long mSec) {
-	unsigned long ms = mSec;
-	while(ms > 100) {
-		delay(100);
-		ms -= 100;
-		ESP.wdtFeed();
-	}
-	delay(ms);
-	ESP.wdtFeed();
-	yield();
-}
-
-void ICACHE_RAM_ATTR  delayuSec(unsigned long uSec) {
-	unsigned long us = uSec;
-	while(us > 100000) {
-		delay(100);
-		us -= 100000;
-		ESP.wdtFeed();
-	}
-	delayMicroseconds(us);
-	ESP.wdtFeed();
-	yield();
-}
-
-void unusedIO() {
-	int i;
-	
-	for(i=0;i<11;i++) {
-		if(unusedPins[i] < 0) {
-			break;
-		} else if(unusedPins[i] != 16) {
-			pinMode(unusedPins[i],INPUT_PULLUP);
-		} else {
-			pinMode(16,INPUT_PULLDOWN_16);
-		}
-	}
-}
 
 void pirStatus() {
 	String response;
@@ -169,65 +76,6 @@ void pirStatus() {
 	response += "<BR>serverMode:" + String(serverMode);
 	response += "<BR>batteryVolts:" + String(battery_volts)+"<BR>";
 	server.send(200, "text/html", response);
-}
-
-/*
-  Connect to local wifi with retries
-  If check is set then test the connection and re-establish if timed out
-*/
-int wifiConnect(int check) {
-	if(check) {
-		if(WiFi.status() != WL_CONNECTED) {
-			if((elapsedTime - wifiCheckTime) * timeInterval > WIFI_CHECK_TIMEOUT) {
-				Serial.println("Wifi connection timed out. Try to relink");
-			} else {
-				return 1;
-			}
-		} else {
-			wifiCheckTime = elapsedTime;
-			return 0;
-		}
-	}
-	wifiCheckTime = elapsedTime;
-#ifdef WM_NAME
-	Serial.println("Set up managed Web");
-#ifdef WM_STATIC_IP
-	wifiManager.setSTAStaticIPConfig(IPAddress(WM_STATIC_IP), IPAddress(WM_STATIC_GATEWAY), IPAddress(255,255,255,0));
-#endif
-	if(check == 0) {
-		wifiManager.setConfigPortalTimeout(180);
-		wifiManager.autoConnect(WM_NAME, WM_PASSWORD);
-	} else {
-		WiFi.begin();
-	}
-#else
-	Serial.println("Set up manual Web");
-	int retries = 0;
-	Serial.print("Connecting to AP");
-	#ifdef AP_IP
-		IPAddress addr1(AP_IP);
-		IPAddress addr2(AP_DNS);
-		IPAddress addr3(AP_GATEWAY);
-		IPAddress addr4(AP_SUBNET);
-		WiFi.config(addr1, addr2, addr3, addr4);
-	#endif
-	WiFi.begin(AP_SSID, AP_PASSWORD);
-	while (WiFi.status() != WL_CONNECTED && retries < AP_MAX_WAIT) {
-		delaymSec(1000);
-		Serial.print(".");
-		retries++;
-	}
-	Serial.println("");
-	if(retries < AP_MAX_WAIT) {
-		Serial.print("WiFi connected ip ");
-		Serial.print(WiFi.localIP());
-		Serial.printf(":%d mac %s\r\n", AP_PORT, WiFi.macAddress().c_str());
-		return 1;
-	} else {
-		Serial.println("WiFi connection attempt failed"); 
-		return 0;
-	} 
-#endif
 }
 
 /*
@@ -245,12 +93,12 @@ void getConfig() {
 	while(retries > 0) {
 		Serial.print("Try to GET config data from Server for: ");
 		Serial.println(macAddr);
+		cClient.begin(client, url);
 		#ifdef CONFIG_AUTH
 			cClient.setAuthorization(EIOT_USERNAME, EIOT_PASSWORD);
 		#else
 			cClient.setAuthorization("");		
 		#endif
-		cClient.begin(url);
 		httpCode = cClient.GET();
 		if (httpCode > 0) {
 			if (httpCode == HTTP_CODE_OK) {
@@ -283,10 +131,10 @@ void getConfig() {
 										case 6: securityDevice = line.toInt();break;
 										case 7:	securityURL = line; break;
 										case 8: adcCal = line.toFloat();
-											if(adcCal < 0) adcCal = dfltADC_CAL;
-											Serial.println("Config fetched from server OK");
-											config = -100;
-											break;
+												if(adcCal < 0) adcCal = dfltADC_CAL;
+												break;
+										case 9:
+											securitySound = line;
 											Serial.println("Config fetched from server OK");
 											config = -100;
 											break;
@@ -317,6 +165,7 @@ void getConfig() {
 	Serial.print("securityDevice:");Serial.println(securityDevice);
 	Serial.print("securityURL:");Serial.println(securityURL);
 	Serial.print("adcCal:");Serial.println(adcCal);
+	Serial.print("securitySound:");Serial.println(securitySound);
 }
 
 /*
@@ -330,8 +179,8 @@ void getFromURL(String url, int retryCount, char* user, char* password) {
 	Serial.println("get from " + url);
 	
 	while(retries > 0) {
+		cClient.begin(client, url);
 		if(user) cClient.setAuthorization(user, password);
-		cClient.begin(url);
 		httpCode = cClient.GET();
 		if (httpCode > 0) {
 			if (httpCode == HTTP_CODE_OK) {
@@ -382,10 +231,10 @@ void notifySecurity(int securityState) {
 /*
  Start notification to pushover
 */
-void startPushNotification(String message) {
+void startPushNotification(String message, String sound) {
 	if(isSendPush == false) {
 		// Form the string
-		pushParameters = "token=" + NOTIFICATION_APP + "&user=" + NOTIFICATION_USER + "&message=" + message;
+		pushParameters = "token=" + NOTIFICATION_APP + "&user=" + NOTIFICATION_USER + "&message=" + message + "&sound=" + sound;
 		isSendPush = true;
 		Serial.println("Connecting to push server");
 		https.connect("api.pushover.net", 443);
@@ -438,7 +287,7 @@ void easyIOTReport(String node, float value, int digital) {
 	Serial.println(url);
 	while(retries > 0) {
 		cClient.setAuthorization(EIOT_USERNAME, EIOT_PASSWORD);
-		cClient.begin(url);
+		cClient.begin(client, url);
 		httpCode = cClient.GET();
 		if (httpCode > 0) {
 			if (httpCode == HTTP_CODE_OK) {
@@ -460,33 +309,24 @@ void easyIOTReport(String node, float value, int digital) {
 	Serial.println("Connection closed");
 }
 
-/*
-  Set up basic wifi, collect config from flash/server, initiate update server
-*/
-void setup() {
-	unusedIO();
-	Serial.begin(115200);
+void setupStart() {
 	digitalWrite(POWER_HOLD_PIN, 1);
 	pinMode(POWER_HOLD_PIN, OUTPUT);
-	Serial.println("Set up Web update service");
-	wifiConnect(0);
-	macAddr = WiFi.macAddress();
-	macAddr.replace(":","");
-	Serial.println(macAddr);
-	getConfig();
-
-	//Update service
-	MDNS.begin(host.c_str());
-	httpUpdater.setup(&server, update_path, update_username, update_password);
-	server.on("/status", pirStatus);
-	server.begin();
-
-	MDNS.addService("http", "tcp", 80);
-	pinMode(SLEEP_MASK, INPUT_PULLUP);
-	sleepMask = digitalRead(SLEEP_MASK);
-	Serial.println("Set up complete");
 }
 
+void extraHandlers() {
+}
+
+void setupEnd() {
+	getConfig();
+	pinMode(SLEEP_MASK, INPUT_PULLUP);
+	sleepMask = digitalRead(SLEEP_MASK);
+	Serial.println("sleepMask:" + String(sleepMask));
+	//if failed to connect then set to complete to skip processing
+	if(WiFi.status() != WL_CONNECTED) {
+		reportState = REPORT_STATE_COMPLETE;
+	}
+}
 
 /*
   Main loop to publish PIR as required
@@ -504,7 +344,7 @@ void loop() {
 #ifdef USE_IFTTT
 			ifttt_notify(pirEvent, pirNotify, String(securityDevice), "");
 #else
-			startPushNotification(pirEvent + String(securityDevice));
+			startPushNotification(pirEvent + String(securityDevice), String(securitySound));
 			reportState = REPORT_STATE_PENDING;
 #endif
 		}
@@ -521,10 +361,11 @@ void loop() {
 			reportState = REPORT_STATE_COMPLETE;
 	}
 	if(reportState == REPORT_STATE_COMPLETE && serverMode == SECURITYSENSOR_MASK && sleepMask == 1) {
+		Serial.println("sleep");
 		WiFi.mode(WIFI_OFF);
 		delaymSec(10);
 		WiFi.forceSleepBegin();
-		delaymSec(1000);
+		delaymSec(500);
 		pinMode(POWER_HOLD_PIN, INPUT);
 		ESP.deepSleep(0);
 	}

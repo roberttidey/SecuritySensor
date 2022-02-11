@@ -22,9 +22,10 @@ See schematics for hook up.
 - DNSServer
 - WiFiManager
 - IFTTTMaker.h
+- BaseSupport.h   https://github.com/roberttidey/BaseSupport
 
 ### Install procedure
-- Change passwords and notification keys in ino to suit
+- Change passwords and notification keys in BaseConfig.h to suit
     - WifiManager,OTA, config server
 - Normal arduino esp8266 compile and upload
 - Use WifiManager to config local wifi
